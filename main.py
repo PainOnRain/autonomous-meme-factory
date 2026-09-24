@@ -37,7 +37,7 @@ MEME_TEMPLATES = [
 
 async def get_fresh_news_pool():
     try:
-        feed = await asyncio.to_thread(feedparser.parse, "https://habr.com/ru/rss/articles/?fl=ru")
+        feed = await asyncio.to_thread(feedparser.parse, "https://panorama.pub/rss")
         if not feed.entries:
             return []
         return [entry.title for entry in feed.entries[:6]]
