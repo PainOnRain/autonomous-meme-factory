@@ -6,121 +6,142 @@ import urllib.parse
 from openai import OpenAI
 from telebot.async_telebot import AsyncTeleBot
 
-# Загрузка секретов из переменных окружения
+# 1. Загрузка секретов
 HF_KEY = os.getenv("HF_API_KEY")
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
 if not all([HF_KEY, TG_TOKEN, TG_CHAT]):
-    print("❌ ОШИБКА: Не все секреты настроены (HF_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID).")
+    print("❌ ОШИБКА: Не все секреты настроены.")
     exit(1)
 
-# Клиент к бесплатному Serverless Router Hugging Face
 client = OpenAI(
     base_url="https://router.huggingface.co/v1",
     api_key=HF_KEY
 )
-
 bot = AsyncTeleBot(TG_TOKEN)
 MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 
 async def get_news_headline():
-    """Скрейпинг свежих новостей из RSS-ленты Хабра"""
+    """Сбор свежих заголовков с Хабра"""
     try:
         feed = await asyncio.to_thread(feedparser.parse, "https://habr.com/ru/rss/articles/?fl=ru")
         if not feed.entries:
             return None
-        top_entries = feed.entries[:5]
-        return random.choice(top_entries).title
+        return random.choice(feed.entries[:5]).title
     except Exception as e:
         print(f"Ошибка парсинга: {e}")
         return None
 
-async def generate_agent_discussion(headline):
-    """Генерация ситком-диалога между Джуниором и Тимлидом и концепта мема"""
-    print(f"🧠 Агенты обсуждают: {headline[:50]}...")
-    
+async def step1_junior_pitch(headline):
+    """Агент 1: Джуниор влетает с новостью в чат"""
+    print("👶 Джуниор генерирует заход...")
     prompt = f"""
-Ты сценарист абсурдного IT-ситкома. Разыграй короткий диалог между двумя агентами по новости:
+Ты восторженный 20-летний Джуниор-разработчик. Ты только что прочитал эту новость:
 "{headline}"
 
-Агенты:
-1. 👶 Джуниор: восторженный неофит, паникует или восхищается баззвордами.
-2. 🚬 Тимлид: уставший циник, отвечает едким сарказмом и приземляет.
-
-ПРАВИЛО ДЛЯ ВИЗУАЛА:
-Придумай визуальную сцену для [ПРОМПТ]. 
-СТРОГИЙ ЗАПРЕТ на красивые лица, моделей, фотостоки, неоновый киберпанк и кинематографичность. 
-Сделай абсурдную бытовую ситуацию или проклятый образ (cursed image), связанный с репликой Тимлида.
-Примеры хорошего стиля:
-- "paranoid man with tinfoil hat aggressively staring down a kitchen toaster, flash photography, 2000s web camera meme, cursed image aesthetic"
-- "a racoon wearing glasses desperately looking at smoking computer servers, messy office, amateur photo, chaos"
-
-Формат вывода СТРОГО:
-[ДИАЛОГ]
-👶 Джуниор: <одна короткая реплика>
-🚬 Тимлид: <едкий саркастичный ответ>
-[ПРОМПТ]
-<детальное описание абсурдной сцены на английском, amateur snapshot, flash photo, cursed meme energy, realistic chaotic absurdity>
+Напиши короткое (1-2 предложения) импульсивное сообщение в рабочий чат.
+Ты восхищен технологиями, сыплешь баззвордами или паникуешь, что вас заменят.
+Используй смайлики. Не придумывай диалог, пиши ТОЛЬКО свою прямую речь.
 """
-
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": "Ты пишешь жесткие, смешные диалоги и абсурдные мемные промпты для айтишников."},
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.9
+        )
+        return response.choices[0].message.content.strip().strip('"')
+    except Exception as e:
+        print(f"Ошибка Джуниора: {e}")
+        return None
+
+async def step2_lead_verdict(headline, junior_text):
+    """Агент 2: Тимлид реагирует на слова Джуниора и формулирует промпт"""
+    print("🚬 Тимлид оценивает тейк...")
+    prompt = f"""
+Новость: "{headline}"
+Джуниор написал в чат: "{junior_text}"
+
+Ты — 40-летний выгоревший Тимлид. Ответь Джуниору прямо на его слова.
+Отрежь его энтузиазм жестким сарказмом, цинизмом или абсурдной житейской правдой (1-2 предложения).
+
+Также придумай идею для мема по мотивам твоего ответа.
+СТРОГИЙ ЗАПРЕТ на красивые лица, моделей, фотостоки и неоновый киберпанк.
+Нужна абсурдная бытовая ситуация, флеш-фотография, cursed meme energy.
+
+Формат ответа СТРОГО:
+ОТВЕТ: <твой саркастичный ответ Джуниору>
+ПРОМПТ: <описание абсурдной мемной сцены на английском, amateur flash photo, chaotic real-life meme>
+"""
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[{"role": "user", "content": prompt}],
             temperature=0.85
         )
         return response.choices[0].message.content
     except Exception as e:
-        print(f"Ошибка ИИ: {e}")
+        print(f"Ошибка Тимлида: {e}")
         return None
 
-async def send_to_telegram(image_url, caption_text):
-    """Публикация изображения с подписью в Telegram-канал"""
-    try:
-        await bot.send_photo(TG_CHAT, image_url, caption=caption_text, parse_mode='HTML')
-        print("✅ Успешно опубликовано в Telegram!")
-    except Exception as e:
-        print(f"Ошибка Telegram: {e}")
-
 async def run_factory_once():
+    # Шаг 1: Получаем новость
     headline = await get_news_headline()
     if not headline:
-        print("❌ Не удалось получить новость.")
         return
     print(f"📰 Новость: {headline}\n")
 
-    raw_output = await generate_agent_discussion(headline)
-    if not raw_output:
-        print("❌ Не удалось сгенерировать диалог.")
+    # Шаг 2: Реплика Джуниора
+    junior_msg = await step1_junior_pitch(headline)
+    if not junior_msg:
         return
-    print(f"🎭 Сценарий:\n{raw_output}\n")
+    print(f"👶 Джуниор:\n{junior_msg}\n")
 
-    dialogue_part = ""
-    img_prompt = ""
+    # Шаг 3: Реакция Тимлида
+    lead_raw = await step2_lead_verdict(headline, junior_msg)
+    if not lead_raw:
+        return
+    print(f"🚬 Тимлид сырой ответ:\n{lead_raw}\n")
 
-    # Парсинг структурированного ответа
-    if "[ДИАЛОГ]" in raw_output and "[ПРОМПТ]" in raw_output:
-        parts = raw_output.split("[ПРОМПТ]")
-        dialogue_part = parts[0].replace("[ДИАЛОГ]", "").strip()
-        img_prompt = parts[1].strip()
-    else:
-        dialogue_part = raw_output[:300].strip()
-        img_prompt = "confused funny animal staring at a smoking broken appliance, flash snapshot, cursed meme"
+    lead_reply = "Опять переделывать за вами..."
+    img_prompt = "tired programmer staring at broken microwave oven, amateur flash photo"
 
-    # Сборка запроса к Pollinations с моделью Flux для качественной генерации деталей
-    encoded_img_prompt = urllib.parse.quote(f"{img_prompt}, raw amateur photo, flash snapshot, cursed meme context")
+    for line in lead_raw.split("\n"):
+        if line.startswith("ОТВЕТ:"):
+            lead_reply = line.replace("ОТВЕТ:", "").strip()
+        elif line.startswith("ПРОМПТ:"):
+            img_prompt = line.replace("ПРОМПТ:", "").strip()
+
+    # Шаг 4: Генерация мем-арта
+    encoded_img_prompt = urllib.parse.quote(f"{img_prompt}, raw snapshot, cursed meme")
     image_url = f"https://image.pollinations.ai/prompt/{encoded_img_prompt}?width=1024&height=1024&nologo=true&private=true&model=flux"
 
-    caption_text = (
+    # Шаг 5: Публикация первого сообщения от Джуниора
+    junior_post_text = (
         f"📰 <b>{headline}</b>\n\n"
-        f"<blockquote>{dialogue_part}</blockquote>"
+        f"👶 <b>Джуниор:</b> {junior_msg}"
     )
+    
+    try:
+        sent_msg = await bot.send_message(TG_CHAT, junior_post_text, parse_mode='HTML')
+        print("✅ Сообщение Джуниора отправлено.")
 
-    await send_to_telegram(image_url, caption_text)
+        # Имитируем живую паузу на ответ
+        print("⏳ Тимлид печатает ответ...")
+        await asyncio.sleep(4)
+
+        # Публикация ответа Тимлида реплаем 
+        lead_post_caption = f"🚬 <b>Тимлид:</b> {lead_reply}"
+        await bot.send_photo(
+            TG_CHAT, 
+            image_url, 
+            caption=lead_post_caption, 
+            reply_to_message_id=sent_msg.message_id, 
+            parse_mode='HTML'
+        )
+        print("✅ Мем Тимлида успешно опубликован в ответ!")
+    except Exception as e:
+        print(f"Ошибка отправки в Telegram: {e}")
 
 if __name__ == "__main__":
     asyncio.run(run_factory_once())
