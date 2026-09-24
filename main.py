@@ -6,6 +6,7 @@ import httpx
 from openai import OpenAI
 from telebot.async_telebot import AsyncTeleBot
 
+# 1. Секреты
 HF_KEY = os.getenv("HF_API_KEY")
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID")
@@ -21,36 +22,52 @@ client = OpenAI(
 bot = AsyncTeleBot(TG_TOKEN)
 MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 
-# Список поддерживаемых культовых шаблонов
+# Источник: ИА «Панорама»
+PANORAMA_RSS = "https://panorama.pub/rss"
+
 MEME_TEMPLATES = [
     "fine",          # This is fine (собака в огне)
     "harold",        # Гарольд скрывающий боль
-    "clown",         # Клоун наносит грим (по шагам)
-    "fry",           # Подозрительный Фрай (Not sure if...)
-    "disastergirl",  # Девочка на фоне горящего дома
-    "rollsafe",      # Парень стучит по виску (смекалочка)
-    "spiderman",     # Спайдермены показывают пальцем друг на друга
-    "doge",          # Доге
-    "buzz",          # Базз Лайтер: повсюду...
+    "clown",         # Клоун наносит грим
+    "fry",           # Подозрительный Фрай
+    "disastergirl",  # Девочка на фоне пожара
+    "rollsafe",      # Парень со смекалочкой
+    "spiderman",     # Спайдермены
+    "doge",          # Пёс Доге
+    "buzz",          # Базз Лайтер (везде...)
     "drake"          # Дрейк (нет / да)
 ]
 
 async def get_fresh_news_pool():
-    try:
-        feed = await asyncio.to_thread(feedparser.parse, "https://panorama.pub/rss")
-        if not feed.entries:
-            return []
-        return [entry.title for entry in feed.entries[:6]]
-    except Exception as e:
-        print(f"Ошибка парсинга: {e}")
-        return []
+    """Скачиваем RSS Панорамы с маскировкой под браузер"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+
+    async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=15.0) as http_client:
+        try:
+            print(f"📡 Загружаем ленту ИА «Панорама»: {PANORAMA_RSS}")
+            res = await http_client.get(PANORAMA_RSS)
+            if res.status_code == 200:
+                feed = feedparser.parse(res.text)
+                titles = [entry.title for entry in feed.entries if getattr(entry, 'title', None)]
+                if titles:
+                    print(f"✅ Найдено новостей: {len(titles)}")
+                    return titles[:6]
+            print(f"⚠️ Панорама вернула код: {res.status_code}")
+        except Exception as e:
+            print(f"⚠️ Ошибка запроса: {e}")
+
+    return []
 
 async def junior_pitch(headline):
     prompt = f"""
-Ты восторженный Джуниор. Ты прибежал к Тимлиду с новостью:
+Ты наивный Джуниор-программист. Ты только что прочитал эту новость и ПРИНЯЛ ЕЁ ЗА ЧИСТУЮ МОНЕТУ:
 "{headline}"
 
-Напиши короткий (1-2 предложения) заход с наивным энтузиазмом или паникой. Используй баззворды. Выдай ТОЛЬКО текст реплики.
+Напиши короткий (1-2 предложения) восторженный или паникующий заход Тимлиду в чат.
+Ты абсолютно уверен, что это правда, и предлагаешь срочно внедрять это в проект или кричишь, что вас уволят.
+Выдай ТОЛЬКО текст своей реплики.
 """
     try:
         response = client.chat.completions.create(
@@ -61,28 +78,29 @@ async def junior_pitch(headline):
         return response.choices[0].message.content.strip().strip('"')
     except Exception as e:
         print(f"Ошибка Джуниора: {e}")
-        return "Шеф, ты видел? Это же перевернет весь стек!"
+        return "Шеф, ты читал?! Нам срочно нужно переписать весь прод под новые требования!"
 
 async def lead_evaluation(headline, junior_msg, is_last=False):
-    force = "Это последняя попытка, ОБЯЗАТЕЛЬНО поставь СТАТУС: ОДОБРЕНО." if is_last else ""
+    force = "Это последняя новость, ОБЯЗАТЕЛЬНО поставь СТАТУС: ОДОБРЕНО." if is_last else ""
     templates_str = ", ".join(MEME_TEMPLATES)
-    
+
     prompt = f"""
 Новость: "{headline}"
-Джуниор: "{junior_msg}"
+Джуниор (поверил на полном серьезе): "{junior_msg}"
 
 Ты — 45-летний злой, циничный Тимлид. 
-1. Оцени новость: если скучно — ОТКЛОНИ. Если можно едко обстебать — ОДОБРИ.
-2. Выбери наиболее подходящий мем-шаблон из списка: [{templates_str}].
-3. Придумай верхний (ТЕКСТ_1) и нижний (ТЕКСТ_2) короткий текст для нанесения на мем. Текст должен быть острым и смешным!
+Ты понимаешь весь абсурд ситуации или уничтожаешь Джуниора за то, что он ведётся на любую дичь.
+1. Оцени тему: если слишком тонко/непонятно — ОТКЛОНИ. Если абсурд очевиден и можно едко приложить Джуниора — ОДОБРИ.
+2. Выбери мем-шаблон: [{templates_str}].
+3. Придумай верхний (ТЕКСТ_1) и нижний (ТЕКСТ_2) текст на русском (по 2-5 слов).
 {force}
 
 Формат ответа СТРОГО:
 СТАТУС: [ОДОБРЕНО или ОТКЛОНЕНО]
-ОТВЕТ: <твой комментарий в чат>
-ШАБЛОН: <одно слово из списка шаблонов>
-ТЕКСТ_1: <верхняя строчка мема, до 5-6 слов>
-ТЕКСТ_2: <нижняя строчка мема, до 5-6 слов>
+ОТВЕТ: <твой саркастичный комментарий>
+ШАБЛОН: <одно слово из шаблонов>
+ТЕКСТ_1: <верхняя строчка>
+ТЕКСТ_2: <нижняя строчка>
 """
     try:
         response = client.chat.completions.create(
@@ -96,36 +114,44 @@ async def lead_evaluation(headline, junior_msg, is_last=False):
         return None
 
 async def create_meme_image(template, text1, text2):
-    """Генерация мема через Memegen API с надписями прямо на картинке"""
     api_url = "https://api.memegen.link/images"
     payload = {
         "template_id": template if template in MEME_TEMPLATES else "fine",
         "text": [text1, text2]
     }
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
         try:
-            res = await http_client.post(api_url, json=payload, timeout=10.0)
+            res = await http_client.post(api_url, json=payload)
             if res.status_code == 201:
                 return res.json().get("url")
         except Exception as e:
-            print(f"Ошибка Memegen: {e}")
-    # Фоллбэк
-    return f"https://api.memegen.link/images/fine/{text1}/{text2}.png"
+            print(f"Ошибка Memegen API: {e}")
+
+    t1_clean = text1.replace("/", "").replace("?", "").replace("#", "") or "_"
+    t2_clean = text2.replace("/", "").replace("?", "").replace("#", "") or "_"
+    return f"https://api.memegen.link/images/{template}/{t1_clean}/{t2_clean}.png"
 
 async def run_factory():
+    print("🚀 Старт цикла Autonomous Meme Factory (Панорама)...")
     news_pool = await get_fresh_news_pool()
     if not news_pool:
+        print("❌ Не удалось загрузить новости Панорамы.")
         return
 
     approved_headline = None
     approved_junior = None
     approved_reply = None
     template = "fine"
-    t1, t2 = "ВСЁ ХОРОШО", "ПРОД ГОРИТ"
+    t1, t2 = "ПАНОРАМА", "ДЖУН ПОВЕРИЛ"
 
     for idx, headline in enumerate(news_pool, 1):
         is_last = (idx == len(news_pool))
+        print(f"\n--- [Раунд {idx}/{len(news_pool)}] ---")
+        print(f"📰 {headline}")
+
         j_msg = await junior_pitch(headline)
+        print(f"👶 Джун: {j_msg}")
+
         lead_raw = await lead_evaluation(headline, j_msg, is_last=is_last)
         if not lead_raw:
             continue
@@ -144,28 +170,33 @@ async def run_factory():
             elif line.startswith("ТЕКСТ_2:"):
                 t2 = line.replace("ТЕКСТ_2:", "").strip()
 
+        print(f"🚬 Тимлид ({status}): {approved_reply}")
+
         if status == "ОДОБРЕНО":
             approved_headline = headline
             approved_junior = j_msg
             break
 
     if not approved_headline:
+        print("❌ Ни один инфоповод не утвержден.")
         return
 
-    # Получаем ссылку на готовый мем с наложенным текстом
+    print(f"\n🖼 Создаём мем [{template}]: '{t1}' / '{t2}'...")
     image_url = await create_meme_image(template, t1, t2)
-    print(f"🖼 Мем сгенерирован ({template}): {image_url}")
+    print(f"🔗 Ссылка: {image_url}")
 
     # Публикация
     junior_post = f"📰 <b>{approved_headline}</b>\n\n👶 <b>Джуниор:</b> {approved_junior}"
     try:
         sent = await bot.send_message(TG_CHAT, junior_post, parse_mode='HTML')
+        print("✅ Джуниор отписался.")
+
         await asyncio.sleep(3)
         lead_caption = f"🚬 <b>Тимлид:</b> {approved_reply}"
         await bot.send_photo(TG_CHAT, image_url, caption=lead_caption, reply_to_message_id=sent.message_id, parse_mode='HTML')
-        print("✅ Пост с мемом успешно опубликован!")
+        print("✅ Мем Тимлида отправлен в ответ!")
     except Exception as e:
-        print(f"Ошибка Telegram: {e}")
+        print(f"❌ Ошибка Telegram: {e}")
 
 if __name__ == "__main__":
     asyncio.run(run_factory())
