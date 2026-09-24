@@ -2,7 +2,7 @@ import os
 import asyncio
 import feedparser
 import random
-import urllib.parse
+import httpx
 from openai import OpenAI
 from telebot.async_telebot import AsyncTeleBot
 
@@ -21,6 +21,20 @@ client = OpenAI(
 bot = AsyncTeleBot(TG_TOKEN)
 MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 
+# Список поддерживаемых культовых шаблонов
+MEME_TEMPLATES = [
+    "fine",          # This is fine (собака в огне)
+    "harold",        # Гарольд скрывающий боль
+    "clown",         # Клоун наносит грим (по шагам)
+    "fry",           # Подозрительный Фрай (Not sure if...)
+    "disastergirl",  # Девочка на фоне горящего дома
+    "rollsafe",      # Парень стучит по виску (смекалочка)
+    "spiderman",     # Спайдермены показывают пальцем друг на друга
+    "doge",          # Доге
+    "buzz",          # Базз Лайтер: повсюду...
+    "drake"          # Дрейк (нет / да)
+]
+
 async def get_fresh_news_pool():
     try:
         feed = await asyncio.to_thread(feedparser.parse, "https://habr.com/ru/rss/articles/?fl=ru")
@@ -33,11 +47,10 @@ async def get_fresh_news_pool():
 
 async def junior_pitch(headline):
     prompt = f"""
-Ты наивный, суетливый Джуниор. Ты прибежал к Тимлиду с новостью:
+Ты восторженный Джуниор. Ты прибежал к Тимлиду с новостью:
 "{headline}"
 
-Напиши короткий (1-2 предложения) восторженный или паникующий заход в рабочий чат.
-Используй модные зумерские баззворды. Выдай ТОЛЬКО свою реплику.
+Напиши короткий (1-2 предложения) заход с наивным энтузиазмом или паникой. Используй баззворды. Выдай ТОЛЬКО текст реплики.
 """
     try:
         response = client.chat.completions.create(
@@ -48,35 +61,28 @@ async def junior_pitch(headline):
         return response.choices[0].message.content.strip().strip('"')
     except Exception as e:
         print(f"Ошибка Джуниора: {e}")
-        return "Шеф, ты видел? Это же полностью перевернёт всю индустрию!"
+        return "Шеф, ты видел? Это же перевернет весь стек!"
 
-async def lead_evaluation(headline, junior_msg, is_last_chance=False):
-    force_instruction = ""
-    if is_last_chance:
-        force_instruction = "Это последний инфоповод, ставь СТАТУС: ОДОБРЕНО, но обстеби новость с максимальной злобой."
-
+async def lead_evaluation(headline, junior_msg, is_last=False):
+    force = "Это последняя попытка, ОБЯЗАТЕЛЬНО поставь СТАТУС: ОДОБРЕНО." if is_last else ""
+    templates_str = ", ".join(MEME_TEMPLATES)
+    
     prompt = f"""
 Новость: "{headline}"
 Джуниор: "{junior_msg}"
 
-Ты — 45-летний злой, токсичный и циничный Тимлид. 
-Ты ненавидишь хайп и корпоративную чушь.
+Ты — 45-летний злой, циничный Тимлид. 
+1. Оцени новость: если скучно — ОТКЛОНИ. Если можно едко обстебать — ОДОБРИ.
+2. Выбери наиболее подходящий мем-шаблон из списка: [{templates_str}].
+3. Придумай верхний (ТЕКСТ_1) и нижний (ТЕКСТ_2) короткий текст для нанесения на мем. Текст должен быть острым и смешным!
+{force}
 
-1. Если новость скучная вода — ОТКЛОНИ. Пошли Джуниора искать нормальную тему.
-2. Если новость смешная или абсурдная — ОДОБРИ. Уничтожь наивность Джуниора едким ответом.
-{force_instruction}
-
-ПРАВИЛО ГЕНЕРАЦИИ МЕМА ДЛЯ [ПРОМПТ]:
-НИКАКИХ красивых людей, 3D-графики, VR-очков, киберпанка и постеров!
-Мем должен быть смешным сам по себе. Выбери ОДИН из стилей:
-- ВАРИАНТ А (Cursed Photo): Абсурдная сцена из жизни со вспышкой, снятая на дешёвый телефон (например: дед с паяльником и вантузом перед гигантским механизмом, серверная замотанная синей изолентой, человек в панике перед горящим чайником).
-- ВАРИАНТ B (Животные): Ошалевший кот с выпученными глазами, макака в рабочей каске с молотком, енот в проводах.
-- ВАРИАНТ C (Wojak/Комикс): Смешной интернет-мем стиль, crying soyjak, classic rage comic panel.
-
-Формат вывода СТРОГО:
+Формат ответа СТРОГО:
 СТАТУС: [ОДОБРЕНО или ОТКЛОНЕНО]
-ОТВЕТ: <твой токсичный саркастичный ответ>
-ПРОМПТ: <описание мема на английском, hilarious internet meme, cursed low quality funny photo, direct harsh flash, absurd humor>
+ОТВЕТ: <твой комментарий в чат>
+ШАБЛОН: <одно слово из списка шаблонов>
+ТЕКСТ_1: <верхняя строчка мема, до 5-6 слов>
+ТЕКСТ_2: <нижняя строчка мема, до 5-6 слов>
 """
     try:
         response = client.chat.completions.create(
@@ -89,90 +95,75 @@ async def lead_evaluation(headline, junior_msg, is_last_chance=False):
         print(f"Ошибка Тимлида: {e}")
         return None
 
+async def create_meme_image(template, text1, text2):
+    """Генерация мема через Memegen API с надписями прямо на картинке"""
+    api_url = "https://api.memegen.link/images"
+    payload = {
+        "template_id": template if template in MEME_TEMPLATES else "fine",
+        "text": [text1, text2]
+    }
+    async with httpx.AsyncClient() as http_client:
+        try:
+            res = await http_client.post(api_url, json=payload, timeout=10.0)
+            if res.status_code == 201:
+                return res.json().get("url")
+        except Exception as e:
+            print(f"Ошибка Memegen: {e}")
+    # Фоллбэк
+    return f"https://api.memegen.link/images/fine/{text1}/{text2}.png"
+
 async def run_factory():
     news_pool = await get_fresh_news_pool()
     if not news_pool:
-        print("❌ Не удалось получить новости.")
         return
 
     approved_headline = None
-    approved_junior_msg = None
-    approved_lead_reply = None
-    approved_img_prompt = None
-
-    total = len(news_pool)
-    print(f"📋 В очереди {total} новостей.\n")
+    approved_junior = None
+    approved_reply = None
+    template = "fine"
+    t1, t2 = "ВСЁ ХОРОШО", "ПРОД ГОРИТ"
 
     for idx, headline in enumerate(news_pool, 1):
-        is_last = (idx == total)
-        print(f"--- [Попытка {idx}/{total}] ---")
-        print(f"📰 {headline}")
-
+        is_last = (idx == len(news_pool))
         j_msg = await junior_pitch(headline)
-        print(f"👶 Джуниор: {j_msg}")
-
-        lead_raw = await lead_evaluation(headline, j_msg, is_last_chance=is_last)
+        lead_raw = await lead_evaluation(headline, j_msg, is_last=is_last)
         if not lead_raw:
             continue
 
         status = "ОТКЛОНЕНО"
-        lead_reply = "Опять бред притащил."
-        img_prompt = ""
-
         for line in lead_raw.split("\n"):
             line = line.strip()
             if line.startswith("СТАТУС:"):
                 status = "ОДОБРЕНО" if "ОДОБРЕНО" in line.upper() else "ОТКЛОНЕНО"
             elif line.startswith("ОТВЕТ:"):
-                lead_reply = line.replace("ОТВЕТ:", "").strip()
-            elif line.startswith("ПРОМПТ:"):
-                img_prompt = line.replace("ПРОМПТ:", "").strip()
-
-        print(f"🚬 Тимлид ({status}): {lead_reply}\n")
+                approved_reply = line.replace("ОТВЕТ:", "").strip()
+            elif line.startswith("ШАБЛОН:"):
+                template = line.replace("ШАБЛОН:", "").strip().lower()
+            elif line.startswith("ТЕКСТ_1:"):
+                t1 = line.replace("ТЕКСТ_1:", "").strip()
+            elif line.startswith("ТЕКСТ_2:"):
+                t2 = line.replace("ТЕКСТ_2:", "").strip()
 
         if status == "ОДОБРЕНО":
             approved_headline = headline
-            approved_junior_msg = j_msg
-            approved_lead_reply = lead_reply
-            approved_img_prompt = img_prompt or "funny shocked cat staring at broken tech, amateur flash photo"
+            approved_junior = j_msg
             break
-        else:
-            await asyncio.sleep(1)
 
     if not approved_headline:
         return
 
-    # Задаем жесткий анти-глянцевый стиль для Flux
-    meme_modifiers = (
-        "hilarious funny meme, cursed image aesthetic, amateur grainy snapshot, "
-        "harsh direct flash, 2000s internet meme energy, absurd, no 3d render, no cinematic art"
-    )
-    final_prompt = f"{approved_img_prompt}, {meme_modifiers}"
-    encoded_img_prompt = urllib.parse.quote(final_prompt)
-    image_url = f"https://image.pollinations.ai/prompt/{encoded_img_prompt}?width=1024&height=1024&nologo=true&private=true&model=flux"
+    # Получаем ссылку на готовый мем с наложенным текстом
+    image_url = await create_meme_image(template, t1, t2)
+    print(f"🖼 Мем сгенерирован ({template}): {image_url}")
 
-    # Отправка сообщений
-    junior_post_text = (
-        f"📰 <b>{approved_headline}</b>\n\n"
-        f"👶 <b>Джуниор:</b> {approved_junior_msg}"
-    )
-
+    # Публикация
+    junior_post = f"📰 <b>{approved_headline}</b>\n\n👶 <b>Джуниор:</b> {approved_junior}"
     try:
-        sent_msg = await bot.send_message(TG_CHAT, junior_post_text, parse_mode='HTML')
-        print("✅ Пост Джуниора опубликован.")
-
-        print("⏳ Тимлид генерирует ответ и мем...")
-        await asyncio.sleep(4)
-
-        lead_caption = f"🚬 <b>Тимлид:</b> {approved_lead_reply}"
-        await bot.send_photo(
-            TG_CHAT,
-            image_url,
-            caption=lead_caption,
-            reply_to_message_id=sent_msg.message_id,
-            parse_mode='HTML'
-        )
-        print("✅ Мем успешно отправлен в ответ!")
+        sent = await bot.send_message(TG_CHAT, junior_post, parse_mode='HTML')
+        await asyncio.sleep(3)
+        lead_caption = f"🚬 <b>Тимлид:</b> {approved_reply}"
+        await bot.send_photo(TG_CHAT, image_url, caption=lead_caption, reply_to_message_id=sent.message_id, parse_mode='HTML')
+        print("✅ Пост с мемом успешно опубликован!")
     except Exception as e:
         print(f"Ошибка Telegram: {e}")
 
