@@ -6,7 +6,6 @@ import urllib.parse
 from openai import OpenAI
 from telebot.async_telebot import AsyncTeleBot
 
-# 1. Загрузка секретов
 HF_KEY = os.getenv("HF_API_KEY")
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID")
@@ -23,26 +22,22 @@ bot = AsyncTeleBot(TG_TOKEN)
 MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 
 async def get_fresh_news_pool():
-    """Собираем пул из 6 свежих новостей с Хабра"""
     try:
         feed = await asyncio.to_thread(feedparser.parse, "https://habr.com/ru/rss/articles/?fl=ru")
         if not feed.entries:
             return []
-        # Забираем заголовки первых 6 статей
         return [entry.title for entry in feed.entries[:6]]
     except Exception as e:
         print(f"Ошибка парсинга: {e}")
         return []
 
 async def junior_pitch(headline):
-    """Джуниор приносит инфоповод с горящими глазами"""
     prompt = f"""
-Ты наивный, гиперактивный Джуниор. Ты прибежал в личку к Тимлиду с новостью с Хабра:
+Ты наивный, суетливый Джуниор. Ты прибежал к Тимлиду с новостью:
 "{headline}"
 
-Напиши короткий (1-2 предложения) восторженный или паникующий заход. 
-Используй модные слова (AI, стек, оптимизация, переписать всё, сингулярность). 
-Пиши ТОЛЬКО свою реплику.
+Напиши короткий (1-2 предложения) восторженный или паникующий заход в рабочий чат.
+Используй модные зумерские баззворды. Выдай ТОЛЬКО свою реплику.
 """
     try:
         response = client.chat.completions.create(
@@ -53,40 +48,35 @@ async def junior_pitch(headline):
         return response.choices[0].message.content.strip().strip('"')
     except Exception as e:
         print(f"Ошибка Джуниора: {e}")
-        return "Шеф, глянь новость, это же революция!"
+        return "Шеф, ты видел? Это же полностью перевернёт всю индустрию!"
 
 async def lead_evaluation(headline, junior_msg, is_last_chance=False):
-    """
-    Тимлид: токсичный, агрессивный циник. 
-    Оценивает, можно ли сделать из этого смешной мем.
-    """
     force_instruction = ""
     if is_last_chance:
-        force_instruction = "Это последняя новость в ленте, поэтому ты ОБЯЗАН поставить СТАТУС: ОДОБРЕНО, но с максимальным презрением."
+        force_instruction = "Это последний инфоповод, ставь СТАТУС: ОДОБРЕНО, но обстеби новость с максимальной злобой."
 
     prompt = f"""
 Новость: "{headline}"
-Джуниор предлагает: "{junior_msg}"
+Джуниор: "{junior_msg}"
 
-Ты — 45-летний предельно токсичный, грубый и выгоревший Тимлид. 
-Ты ненавидишь глупые вопросы, зумерский энтузиазм и корпоративную чушь.
-Твоя задача — оценить новость для мема.
+Ты — 45-летний злой, токсичный и циничный Тимлид. 
+Ты ненавидишь хайп и корпоративную чушь.
 
-ПРАВИЛА:
-1. Если новость скучная, унылая корпоративная вода или банальщина — ОТКЛОНИ её. 
-Опусти Джуниора на землю матом/жестким сарказмом в стиле «Где ты этот мусор откопал? Иди ищи нормальный инфоповод, пока я тебе доступ к репозиторию не закрыл».
-2. Если новость абсурдная, жизненная, про поломки, ИИ-хайп или распил — ОДОБРИ её. 
-Выдай едкий циничный комментарий и придумай идею мема.
+1. Если новость скучная вода — ОТКЛОНИ. Пошли Джуниора искать нормальную тему.
+2. Если новость смешная или абсурдная — ОДОБРИ. Уничтожь наивность Джуниора едким ответом.
 {force_instruction}
 
-МЕМ-ПРОМПТ:
-Запрещены красивые лица, фотомодели и неоновый арт. 
-Только бытовой абсурд, флеш-фотография (amateur flash snapshot), проклятый реализм (cursed image aesthetic).
+ПРАВИЛО ГЕНЕРАЦИИ МЕМА ДЛЯ [ПРОМПТ]:
+НИКАКИХ красивых людей, 3D-графики, VR-очков, киберпанка и постеров!
+Мем должен быть смешным сам по себе. Выбери ОДИН из стилей:
+- ВАРИАНТ А (Cursed Photo): Абсурдная сцена из жизни со вспышкой, снятая на дешёвый телефон (например: дед с паяльником и вантузом перед гигантским механизмом, серверная замотанная синей изолентой, человек в панике перед горящим чайником).
+- ВАРИАНТ B (Животные): Ошалевший кот с выпученными глазами, макака в рабочей каске с молотком, енот в проводах.
+- ВАРИАНТ C (Wojak/Комикс): Смешной интернет-мем стиль, crying soyjak, classic rage comic panel.
 
 Формат вывода СТРОГО:
 СТАТУС: [ОДОБРЕНО или ОТКЛОНЕНО]
-ОТВЕТ: <твой грубый ответ Джуниору>
-ПРОМПТ: <описание мемной сцены на английском (только если ОДОБРЕНО, иначе оставь пустым)>
+ОТВЕТ: <твой токсичный саркастичный ответ>
+ПРОМПТ: <описание мема на английском, hilarious internet meme, cursed low quality funny photo, direct harsh flash, absurd humor>
 """
     try:
         response = client.chat.completions.create(
@@ -110,14 +100,13 @@ async def run_factory():
     approved_lead_reply = None
     approved_img_prompt = None
 
-    total_candidates = len(news_pool)
-    print(f"📋 В очереди на проверку {total_candidates} новостей.\n")
+    total = len(news_pool)
+    print(f"📋 В очереди {total} новостей.\n")
 
-    # Конвейер отбора: гоняем Джуниора, пока Тимлид не утвердит
     for idx, headline in enumerate(news_pool, 1):
-        is_last = (idx == total_candidates)
-        print(f"--- [Попытка {idx}/{total_candidates}] ---")
-        print(f"📰 Новость: {headline}")
+        is_last = (idx == total)
+        print(f"--- [Попытка {idx}/{total}] ---")
+        print(f"📰 {headline}")
 
         j_msg = await junior_pitch(headline)
         print(f"👶 Джуниор: {j_msg}")
@@ -127,7 +116,7 @@ async def run_factory():
             continue
 
         status = "ОТКЛОНЕНО"
-        lead_reply = "Мусор. Переделывай."
+        lead_reply = "Опять бред притащил."
         img_prompt = ""
 
         for line in lead_raw.split("\n"):
@@ -145,21 +134,24 @@ async def run_factory():
             approved_headline = headline
             approved_junior_msg = j_msg
             approved_lead_reply = lead_reply
-            approved_img_prompt = img_prompt or "stressed IT worker screaming at broken computer, amateur flash photo"
+            approved_img_prompt = img_prompt or "funny shocked cat staring at broken tech, amateur flash photo"
             break
         else:
-            print("❌ Тимлид забраковал новость. Джуниор идёт искать дальше...\n")
             await asyncio.sleep(1)
 
     if not approved_headline:
-        print("❌ Ни одна новость не прошла редсовет.")
         return
 
-    # Генерация визуала через Flux
-    encoded_img_prompt = urllib.parse.quote(f"{approved_img_prompt}, raw amateur photo, flash photography, cursed meme vibe")
+    # Задаем жесткий анти-глянцевый стиль для Flux
+    meme_modifiers = (
+        "hilarious funny meme, cursed image aesthetic, amateur grainy snapshot, "
+        "harsh direct flash, 2000s internet meme energy, absurd, no 3d render, no cinematic art"
+    )
+    final_prompt = f"{approved_img_prompt}, {meme_modifiers}"
+    encoded_img_prompt = urllib.parse.quote(final_prompt)
     image_url = f"https://image.pollinations.ai/prompt/{encoded_img_prompt}?width=1024&height=1024&nologo=true&private=true&model=flux"
 
-    # Отправка в Telegram
+    # Отправка сообщений
     junior_post_text = (
         f"📰 <b>{approved_headline}</b>\n\n"
         f"👶 <b>Джуниор:</b> {approved_junior_msg}"
@@ -169,7 +161,7 @@ async def run_factory():
         sent_msg = await bot.send_message(TG_CHAT, junior_post_text, parse_mode='HTML')
         print("✅ Пост Джуниора опубликован.")
 
-        print("⏳ Тимлид печатает разнос...")
+        print("⏳ Тимлид генерирует ответ и мем...")
         await asyncio.sleep(4)
 
         lead_caption = f"🚬 <b>Тимлид:</b> {approved_lead_reply}"
