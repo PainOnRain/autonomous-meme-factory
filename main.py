@@ -4,6 +4,7 @@ import io
 import html
 import re
 import urllib.parse
+import random
 import httpx
 from openai import OpenAI
 from telebot.async_telebot import AsyncTeleBot
