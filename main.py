@@ -10,22 +10,25 @@ import httpx
 from openai import OpenAI
 from telebot.async_telebot import AsyncTeleBot
 
-# 1. Загрузка конфигурации
-HF_KEY = os.getenv("HF_API_KEY")
+# 1. Загрузка переменных окружения
+OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
 TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID")
 DB_PATH = "published_history.db"
 
-if not all([HF_KEY, TG_TOKEN, TG_CHAT]):
-    print("❌ ОШИБКА: Не все переменные окружения заданы (HF_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID).")
+if not all([OPENROUTER_KEY, TG_TOKEN, TG_CHAT]):
+    print("❌ ОШИБКА: Не заданы переменные (OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID).")
     exit(1)
 
+# Клиент OpenRouter (полностью совместим с OpenAI SDK)
 client = OpenAI(
-    base_url="https://router.huggingface.co/v1",
-    api_key=HF_KEY
+    base_url="https://openrouter.ai/api/v1",
+    api_key=OPENROUTER_KEY
 )
+
+# Бесплатная версия Llama 3.1 8B на OpenRouter
+MODEL_NAME = "meta-llama/llama-3.1-8b-instruct:free"
 bot = AsyncTeleBot(TG_TOKEN)
-MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
 
 MEME_TEMPLATES = [
     "clown",         # Клоун наносит грим
@@ -40,7 +43,7 @@ MEME_TEMPLATES = [
     "spiderman"      # Спайдермены
 ]
 
-# Пул архетипов Джуниора для разнообразия реакций
+# Пул архетипов Джуна
 JUNIOR_ARCHETYPES = [
     "ты словил выгорание от двух задач в Jira, жалуешься на микроменеджмент и токсичную культуру овертаймов.",
     "ты в бытовой драме релоканта: заблокировали сервис подписок, иностранный банк заморозил перевод, в кофейне нет матчи.",
@@ -49,7 +52,7 @@ JUNIOR_ARCHETYPES = [
     "ты в открытой панике: боишься, что из-за этой новости компания урежет бюджет на мерч, курсы английского и корпоративного психолога."
 ]
 
-# Пул архетипов Тимлида для разнообразия юмора
+# Пул архетипов Тимлида
 LEAD_ARCHETYPES = [
     "Суровый экс-заводчанин, перешедший в IT: считает программирование курортом, постоянно грозится отправить нытика к фрезерному станку.",
     "Старый циничный бородатый сисадмин: презирает модные фреймворки, скрам, коучей и решает любые проблемы перезагрузкой сервера.",
@@ -57,7 +60,7 @@ LEAD_ARCHETYPES = [
     "Ультра-патриотичный технарь старой школы: убежден, что софт нужно писать на C и отечественном железе, а любые западные жалобы — признак профнепригодности."
 ]
 
-# 2. Локальная база SQLite для защиты от повторных публикаций
+# 2. SQLite база данных для дедупликации постов
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
@@ -77,7 +80,7 @@ def mark_as_posted(post_id: str):
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("INSERT OR IGNORE INTO posted_news (post_id) VALUES (?)", (post_id,))
 
-# 3. Парсинг Telegram-канала с извлечением data-post ID
+# 3. Парсер канала КБ с вытаскиванием post_id
 async def get_fresh_news_pool():
     url = "https://t.me/s/Cbpub"
     headers = {
@@ -92,7 +95,6 @@ async def get_fresh_news_pool():
                 print(f"⚠️ Ошибка загрузки страницы КБ: статус {res.status_code}")
                 return []
 
-            # Извлекаем связку data-post и текст публикации
             pattern = r'<div class="tgme_widget_message\b[^>]*\bdata-post="([^"]+)"[^>]*>[\s\S]*?<div class="tgme_widget_message_text\b[^>]*>([\s\S]*?)</div>'
             matches = re.findall(pattern, res.text)
 
@@ -113,7 +115,7 @@ async def get_fresh_news_pool():
                     summary = " ".join(first_lines[:2])[:220]
                     news.append({"id": post_id, "text": summary})
 
-            # Берём до 6 самых свежих уникальных новостей
+            # Берем до 6 свежих новостей
             seen_ids = set()
             unique_news = []
             for item in reversed(news):
@@ -129,7 +131,7 @@ async def get_fresh_news_pool():
         print(f"❌ Ошибка парсинга канала: {e}")
         return []
 
-# 4. Реакция Джуниора с привязкой к фактуре новости
+# 4. Генерация нытья Джуниора
 async def junior_pitch(headline):
     current_mood = random.choice(JUNIOR_ARCHETYPES)
 
@@ -160,9 +162,9 @@ async def junior_pitch(headline):
         return response.choices[0].message.content.strip().strip('"')
     except Exception as e:
         print(f"Ошибка генерации Джуниора: {e}")
-        return "Коллеги, после такого апдейта я ухожу в режим фокусировки и выключаю мессенджер..."
+        return "Коллеги, после таких новостей я временно беру дей-офф и отключаю уведомления..."
 
-# 5. Оценка и разнос от Тимлида
+# 5. Генерация разноса от Тимлида
 async def lead_evaluation(headline, junior_msg, is_last=False):
     force = "Это последний инфоповод в пачке. Твой вердикт ОБЯЗАТЕЛЬНО: СТАТУС: ОДОБРЕНО." if is_last else ""
     templates_str = ", ".join(MEME_TEMPLATES)
@@ -177,7 +179,7 @@ async def lead_evaluation(headline, junior_msg, is_last=False):
 ТРЕБОВАНИЯ:
 - Ответ должен быть коротким (1-2 хлестких, ядовитых предложения).
 - Разбей конкретный довод Джуна, высмеивая его наивность и оторванность от реальности.
-- Не используй однотипные шаблонные оскорбления; строй панч вокруг того, ЧТО именно сказал Джун.
+- Не используй шаблонные общие оскорбления; строй панч вокруг того, ЧТО именно ляпнул Джун.
 
 ЗАДАЧА:
 1. Оцени инфоповод: если скучная рутина — СТАТУС: ОТКЛОНЕНО. Если есть повод для разноса — СТАТУС: ОДОБРЕНО.
@@ -208,7 +210,7 @@ async def lead_evaluation(headline, junior_msg, is_last=False):
         print(f"Ошибка генерации Тимлида: {e}")
         return None
 
-# 6. Скачивание мема через Memegen API
+# 6. Скачивание мема
 async def download_meme_bytes(template, text1, text2):
     t1_clean = re.sub(r'[/\\?%*:|"<>]', '', text1).strip() or "_"
     t2_clean = re.sub(r'[/\\?%*:|"<>]', '', text2).strip() or "_"
@@ -226,7 +228,7 @@ async def download_meme_bytes(template, text1, text2):
         except Exception as e:
             print(f"Ошибка скачивания мема: {e}")
 
-    # Запасной вариант при сбое генерации
+    # Fallback при ошибке API
     fallback_url = f"https://api.memegen.link/images/{template}/ДЕПЛОЙ_В_ПЯТНИЦУ/РАБОТАЕМ.png"
     try:
         async with httpx.AsyncClient(timeout=10.0) as http_client:
@@ -237,9 +239,9 @@ async def download_meme_bytes(template, text1, text2):
         pass
     return None
 
-# 7. Пайплайн запуска
+# 7. Пайплайн публикации
 async def run_factory():
-    print("🚀 Старт фабрики постов...")
+    print("🚀 Старт генерации контента...")
     init_db()
 
     news_pool = await get_fresh_news_pool()
@@ -299,10 +301,8 @@ async def run_factory():
         print("❌ Инфоповод не выбран.")
         return
 
-    # Скачивание картинки мема
     img_bytes = await download_meme_bytes(template, t1, t2)
 
-    # Публикация в Telegram
     safe_headline = html.escape(approved_item["text"])
     safe_junior = html.escape(approved_junior)
     safe_reply = html.escape(approved_reply)
@@ -325,9 +325,8 @@ async def run_factory():
             await bot.send_message(TG_CHAT, lead_caption, parse_mode='HTML')
             print("⚠️ Мем не загрузился, отправлен текстовый ответ.")
 
-        # Фиксируем пост в базе только после успешной отправки в Telegram
         mark_as_posted(approved_item["id"])
-        print(f"🔒 Новость {approved_item['id']} зафиксирована в базе данных.")
+        print(f"🔒 Новость {approved_item['id']} сохранена в SQLite.")
 
     except Exception as e:
         print(f"❌ Ошибка отправки в Telegram: {e}")
