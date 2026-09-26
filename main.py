@@ -23,7 +23,7 @@ client = OpenAI(
     api_key=HF_KEY
 )
 bot = AsyncTeleBot(TG_TOKEN)
-MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
+MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
 
 MEME_TEMPLATES = [
     "clown",         # Клоун наносит грим
