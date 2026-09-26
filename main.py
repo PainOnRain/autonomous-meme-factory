@@ -27,7 +27,7 @@ client = OpenAI(
 )
 
 # Бесплатная версия Llama 3.1 8B на OpenRouter
-MODEL_NAME = "meta-llama/llama-3.3-70b-instruct:free"
+MODEL_NAME = "meta-llama/llama-3.3-70b-instruct"
 bot = AsyncTeleBot(TG_TOKEN)
 
 MEME_TEMPLATES = [
